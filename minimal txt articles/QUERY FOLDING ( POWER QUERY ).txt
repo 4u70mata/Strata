@@ -1,0 +1,280 @@
+╔══════════════════════════════════════════════════════════════════╗
+║  QUERY FOLDING — PARADIGM FOUNDATION                                                   ║
+╚══════════════════════════════════════════════════════════════════╝
+
+═══════════ 25 · TWO WORLDVIEWS — the split that predicts folding ═══
+
+   ┌──────────────────────────────┬──────────────────────────────┐
+   │ IMPERATIVE WORLDVIEW         │ FUNCTIONAL WORLDVIEW         │
+   │ (C, Java, SQL engine,        │ (M, Haskell, Lisp, RA)       │
+   │  the SERVER's executor)      │                              │
+   ├──────────────────────────────┼──────────────────────────────┤
+   │ Truth  = STATE               │ Truth  = INVARIANT           │
+   │ Time   = DESTRUCTIVE         │ Time   = IRRELEVANT (lazy)   │
+   │ Unit   = statement           │ Unit   = expression          │
+   │ Change = assignment  x := v  │ Change = fresh name x' = f x │
+   │ Order  = sequential, matters │ Order  = dependency DAG      │
+   │ Identity through change      │ Referential transparency     │
+   │ Loop   = mutation of counter │ Fold/unfold, no mutation     │
+   │ Aliasing possible            │ Values, not locations        │
+   └──────────────────────────────┴──────────────────────────────┘
+
+   ⚠ THESIS §:
+      step folds  ⟺  step is expressible in the FUNCTIONAL column.
+      The imperative residue is exactly the non-foldable set.
+
+═══════════ 26 · IMPERATIVE — Truth is State, Time is Destructive ══
+
+   STATE: the world is a store σ : Location ⇀ Value.
+          A program is σ₀ → σ₁ → σ₂ → … → σₙ.
+
+        σ₀ ──stmt₁──▶ σ₁ ──stmt₂──▶ σ₂ ──stmt₃──▶ σ₃
+        │             │             │             │
+     old value     destroyed     destroyed     final
+                   by stmt₁      by stmt₂      state
+
+   TIME IS DESTRUCTIVE:
+     · σ₁ overwrites σ₀ — σ₀ is GONE, unrecoverable from the program
+     · the value of x is a function of WHEN you read it
+     · x = 5; x = 6  ⟹  the first 5 leaves no trace
+
+   CONSEQUENCES IN AN ETL ENGINE:
+     · order of statements is semantic, not incidental
+     · cannot reorder two statements without re-analysis
+     · cannot substitute equal-for-equal naively
+     · cannot push a statement to another engine without a
+       PROOF that the target engine's σ-sequence is equivalent
+     · parallelisation requires independence proofs (read/write sets)
+
+   WHERE YOU MEET IT:
+     · the SERVER's physical executor (query plan = sequence)
+     · Table.Buffer          → freezes σ at a point in time
+     · Table.AddIndexColumn  → value depends on row ORDER = state
+     · List.Accumulate       → state threaded, sequential
+     · DateTime.LocalNow()   → reads ambient σ (the wall clock)
+
+═══════════ 27 · FUNCTIONAL — Truth is Invariant, Time is Irrelevant ══
+
+   INVARIANT: a binding denotes a VALUE, not a location.
+              There is no store to update. x = 1 is a definition,
+              not a box that later holds 2.
+
+        x = 1
+        x₂ = x + 1        ← x still 1, forever, in this term
+        x₃ = x₂ * 10
+
+        substitution is always legal:
+        x₃ ≡ (x + 1) * 10 ≡ (1 + 1) * 10 ≡ 20
+
+   TIME IS IRRELEVANT:
+     · LAZY: a binding is a thunk; nothing is evaluated until the
+       `in` expression forces it. Evaluation ORDER is not specified
+       by the program text — it is induced by the dependency DAG.
+     · MEMOIZED: each thunk forced at most once per evaluation
+       (call-by-need) → the value is STABLE within one run.
+     · LOCATION-TRANSPARENT: the same term has the same value
+       whether evaluated locally, on the server, or in your head.
+
+   CONSEQUENCES:
+     · reorder bindings freely (dependency-permitting)
+     · substitute equals for equals — this IS algebraic reasoning
+     · delegate a subterm to another engine, PROVIDED that engine
+       implements the same theory (equivalences)
+     · parallelism is free where the DAG allows it
+
+   ⚠ LOCATION TRANSPARENCY IS THE WHOLE POINT OF FOLDING:
+      folding = substituting a server-evaluated SQL term for an
+      M term, justified by term equivalence in the RA theory.
+
+═══════════ 28 · MAP — worldview → M artifact → fold status ════════
+
+   ┌──────────────────┬────────────────────┬──────────┬───────────┐
+   │ IMPERATIVE IDEA  │ FUNCTIONAL COUNTER │ M ARTIFACT│ FOLD?    │
+   ├──────────────────┼────────────────────┼──────────┼───────────┤
+   │ assignment x:=v  │ binding  x = v     │ let-bind │ ✅ subst  │
+   │ reassign x:=v'   │ fresh    x'= f x   │ x₂=…     │ ✅ subst  │
+   │ statement        │ expression         │ let…in   │ ✅        │
+   │ sequence σ₀→σₙ   │ dependency DAG     │ Applied  │ ✅ within │
+   │                  │                    │ Steps    │ fold region│
+   │ loop + counter   │ fold/unfold        │ List.Acc │ ⚠ pure,   │
+   │                  │                    │ /Generate│   not RA  │
+   │ mutation in place│ construction       │ Promote… │ ✅        │
+   │ side effect      │ pure function      │ Date.From│ ⚠ if impure│
+   │                  │                    │          │   → local │
+   │ snapshot of σ    │ freeze a thunk     │ Buffer   │ ✗ breaker │
+   │ row order = state│ bag, order-free    │ AddIndex │ ✗ breaker │
+   │ wall clock       │ explicit parameter │ LocalNow │ ✗ impure  │
+   └──────────────────┴────────────────────┴──────────┴───────────┘
+
+═══════════ 29 · PURITY vs FOLDABILITY — they are NOT the same set ═
+
+   Two independent predicates per step:
+
+     PURE(s)      : s is referentially transparent (no ambient state)
+     RA-CLOSED(s) : s is a closed relational-algebra expression, and
+                    every operator ∈ connector capability map 
+
+   FOLD(s) = PURE(s) ∧ RA-CLOSED(s)
+
+   ┌───────────────────────────────────────────────────────────────┐
+   │                    RA-CLOSED                                 │
+   │              ┌──────────────┬──────────────┐                 │
+   │              │   FOLDS ✅   │  local ✗     │                 │
+   │   P U R E  ┌─┼──────────────┼──────────────┤                 │
+   │            │ │ σ, π, ρ, γ,  │ Unpivot      │                 │
+   │         yes│ │ δ, τ, ⋈ same │ Pivot        │                 │
+   │            │ │ src, SUM/CNT │ MEDIAN       │                 │
+   │            │ │              │ List.Accum.  │                 │
+   │            ├─┼──────────────┼──────────────┤                 │
+   │          no│ │ ∅ (empty —   │ Buffer       │                 │
+   │            │ │ impure cannot│ AddIndex     │                 │
+   │            │ │ be folded by │ LocalNow     │                 │
+   │            │ │ construction)│ Random       │                 │
+   │            └─┴──────────────┴──────────────┘                 │
+   └───────────────────────────────────────────────────────────────┘
+
+   ⚠ KEY: List.Accumulate is PURE but NOT RA-closed → local.
+      Table.Buffer is neither → local AND a paradigm violation.
+      Nothing impure is ever foldable: an impure term has no
+      invariant value to substitute, so term-equivalence fails.
+
+═══════════ 30 · THE FOLD BOUNDARY = PURE→IMPURE MEMBRANE ═════════
+
+   ┌─────────────── FUNCTIONAL SIDE ────────────────┐
+   │  M term t                                      │
+   │  · bindings, invariants, lazy, memoized        │
+   │  · equational reasoning valid                  │
+   │  · substitution preserves value                │
+   └───────────────────────┬────────────────────────┘
+                           │  PROOF OBLIGATION
+                           │  t ≡ t′  in the RA theory 
+                           │  (this proof IS "folding")
+                           ▼
+   ┌─────────────── IMPERATIVE SIDE ────────────────┐
+   │  SQL term t′ executed as a physical plan       │
+   │  · σ-sequence over pages, buffers, cursors     │
+   │  · destructive in-place state                  │
+   │  · order of physical ops is semantic           │
+   │  · returns RESULT RELATION R′                  │
+   └───────────────────────┬────────────────────────┘
+                           │  R′ re-enters M as a value
+                           ▼
+   ┌─────────────── FUNCTIONAL SIDE ────────────────┐
+   │  downstream M steps (local engine)             │
+   │  · R′ is now an invariant value in the term    │
+   └────────────────────────────────────────────────┘
+
+   ⚠ The imperative middle is INVISIBLE to M. M only sees the
+      theorem: t ≡ t′. That invisibility is precisely location
+      transparency. It is also why a fold break is not an error —
+      the term is still correct, just evaluated locally.
+
+═══════════ 31 · REFRESH — where TIME re-enters the functional world ═
+
+   Within one evaluation: functional world, value stable, memoized.
+   Across evaluations:    the source σ changes → same term, new value.
+
+        t  ──eval₁──▶  v₁        t is invariant
+        t  ──eval₂──▶  v₂        v₁ ≠ v₂ is possible
+        t  ──eval₃──▶  v₃
+
+   ⚠ IMPURE LEAVES: File.Contents, Odbc.DataSource, Folder.Files,
+      DateTime.LocalNow(), Number.RandomBetween() read ambient σ
+      and are re-executed per evaluation. They are the exact points
+      where the imperative world is allowed to touch M.
+
+   ⟹ WHY INCREMENTAL REFRESH REQUIRES PARAMETERS, NOT LocalNow()
+     ┌──────────────────────────────────────────────────────────┐
+     │ DateTime.LocalNow()  is IMPURE → its value differs per   │
+     │                        run → the query window is not     │
+     │                        a function of the refresh POLICY, │
+     │                        so the server cannot be told which │
+     │                        partitions to reprocess.           │
+     │ RangeStart/RangeEnd  are PURE parameters bound by the    │
+     │                        refresh policy → same term,        │
+     │                        controlled value → foldable over   │
+     │                        partitions.                        │
+     └──────────────────────────────────────────────────────────┘
+
+   ⚠ This is the paradigm statement: the RangeStart/RangeEnd
+      requirement is not a convention — it is the requirement that
+      the query be referentially transparent w.r.t. the policy.
+
+═══════════ 32 · EQUATIONAL REASONING — substitution as the proof ══
+
+   In a functional language, the only reasoning rule you need:
+
+        t₁ ≡ t₂   ⟹   C[t₁] ≡ C[t₂]          (congruence)
+        (λx. e) v ≡ e[x := v]                 (β-reduction)
+
+   Folding, stated exactly:
+
+        M-term  t  ⟶  SQL-term  t′
+        justified iff  t ≡ t′  in the RA theory
+
+   Because bindings are immutable and terms are referentially
+   transparent , the client may substitute t′ for the subterm
+   t without changing the value of the whole query. The server then
+   evaluates t′ under its own imperative semantics — which is sound
+   because the RA theorem already fixed the answer.
+
+   ⚠ A BREAKER is a subterm with NO RA counterpart:
+        t = … C[buffer(S)] …
+        ∄ t′ such that buffer(S) ≡ t′ in RA
+        ⟹ substitution illegal ⟹ t′ cannot be formed
+        ⟹ C[…] and everything below must be evaluated locally
+
+   ⚠ AND: once a non-substitutable subterm appears, congruence
+      forces every enclosing context to stay local — that is the
+      one-line proof "no re-entry downstream of a break".
+
+═══════════ 33 · PARADIGM-LEVEL TRAPS ══════════════════════════════
+
+   ⚠ P1  Treating Applied Steps as a PROGRAM (sequence of statements)
+         rather than a TERM (dependency DAG). Consequence: you
+         believe order is semantic everywhere, so you never reorder
+         to restore folding. See golden order, optimum.
+
+   ⚠ P2  Using Table.Buffer "for performance". Buffer is a SNAPSHOT
+         of σ — the imperative act of freezing time. It destroys
+         substitution, hence folding, and doubles memory. Justified
+         only when a SMALL table is dereferenced 3+ times in one
+         query and the source is already local.
+
+   ⚠ P3  Reaching for List.Accumulate to "avoid mutation". It does
+         avoid mutation — it is a genuine fold — but RA has no fold
+         primitive, so it is local. Purity buys correctness, not
+         folding.
+
+   ⚠ P4  Using DateTime.LocalNow() inside a filtered fact query and
+         then enabling incremental refresh. Impure leaf → no
+         partition predicate → policy silently degrades.
+
+   ⚠ P5  Table.AddIndexColumn as a "stable key". Row order is not a
+         property of a relation (bag semantics) — the index is
+         a function of an unspecified order. Non-deterministic
+         across refresh AND non-foldable. Use a natural key.
+
+   ⚠ P6  Believing "SQL is imperative, therefore everything is
+         stateful". SQL's SEMANTICS are declarative (RA); only its
+         EXECUTION is imperative. Folding is exactly the licence to
+         cross that gap, because the semantics — not the plan — is
+         what must match.
+
+═══════════ 34 · ONE-LINE PARADIGM COLLAPSE ═════════════════════════
+
+   Imperative: truth = state σ, time destructive, x := v overwrites,
+   order semantic, no substitution.
+   Functional: truth = invariant, time irrelevant (lazy + memoized),
+   x = v is a definition, order = dependency DAG, substitution legal.
+   FOLD(step) = PURE(step) ∧ RA-CLOSED(step); impure ⟹ unfoldable by
+   construction, pure-but-outside-RA ⟹ local anyway.
+   Folding = congruence + β-reduction over the RA theory: substitute
+   the server's SQL term t′ for the M term t. Breaker = subterm with
+   no RA counterpart ⟹ no t′ ⟹ local, and by congruence all enclosing
+   contexts stay local.
+   Refresh = the single point where the imperative world re-enters;
+   hence RangeStart/RangeEnd (pure) not DateTime.LocalNow() (impure).
+   ⚠ Reorder to restore folding = exploiting time-irrelevance.
+   ⚠ Buffer / AddIndex / LocalNow = injecting state-over-time, i.e.
+     voluntarily leaving the functional world and paying for it.
